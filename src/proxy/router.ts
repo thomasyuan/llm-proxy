@@ -22,6 +22,7 @@ export class Router {
       if (!provider) continue;
 
       if (model && !provider.models.includes(model)) continue;
+      if (this.registry.isDegraded(id)) continue;
 
       if (provider.subscription && this.registry.subscriptionExpired(id)) {
         const refreshed = await this.tryRefreshSubscription(provider);
@@ -106,5 +107,10 @@ export class Router {
 
   handleFailure(providerId: string, failedKeyIndex: number): void {
     this.registry.rotateKey(providerId, failedKeyIndex);
+    this.registry.recordFailure(providerId);
+  }
+
+  handleSuccess(providerId: string): void {
+    this.registry.resetHealth(providerId);
   }
 }

@@ -3,11 +3,14 @@ import * as path from "path";
 import type { Provider, KeyEntry } from "../types.js";
 
 const COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+const DEGRADATION_THRESHOLD = 3;
+const PROVIDER_COOLDOWN_MS = 30_000; // 30 seconds
 
 export class ProviderRegistry {
   private providers: Map<string, Provider> = new Map();
   private configDir: string;
   private filePath: string;
+  private healthState: Map<string, { consecutiveFailures: number; degradedAt?: string }> = new Map();
 
   constructor(configDir?: string) {
     this.configDir = configDir ?? path.resolve(process.env.LLM_PROXY_HOME ?? "~/.llm-proxy");
@@ -115,5 +118,46 @@ export class ProviderRegistry {
     if (!key.failedAt) return false;
     const failed = new Date(key.failedAt).getTime();
     return Date.now() - failed >= COOLDOWN_MS;
+  }
+
+  /**
+   * Check if a provider is degraded (too many consecutive failures).
+   */
+  isDegraded(providerId: string): boolean {
+    const state = this.healthState.get(providerId);
+    if (!state || !state.degradedAt) return false;
+    const degraded = new Date(state.degradedAt).getTime();
+    return Date.now() - degraded < PROVIDER_COOLDOWN_MS;
+  }
+
+  /**
+   * Record a failure for a provider. Marks degraded after threshold.
+   */
+  recordFailure(providerId: string): void {
+    const state = this.healthState.get(providerId) ?? { consecutiveFailures: 0 };
+    state.consecutiveFailures++;
+    if (state.consecutiveFailures >= DEGRADATION_THRESHOLD) {
+      state.degradedAt = new Date().toISOString();
+    }
+    this.healthState.set(providerId, state);
+  }
+
+  /**
+   * Reset health state after a successful request.
+   */
+  resetHealth(providerId: string): void {
+    const state = this.healthState.get(providerId);
+    if (state) {
+      state.consecutiveFailures = 0;
+      delete state.degradedAt;
+      this.healthState.set(providerId, state);
+    }
+  }
+
+  /**
+   * Get the consecutive failure count for a provider.
+   */
+  getFailureCount(providerId: string): number {
+    return this.healthState.get(providerId)?.consecutiveFailures ?? 0;
   }
 }
