@@ -1,7 +1,8 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 
-const CODEX_CONFIG = path.resolve(process.env.CODEX_HOME ?? "~/.codex", "config.toml");
+const CODEX_CONFIG = path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"), "config.toml");
 
 export interface CodexProxySetting {
   providerId: string;

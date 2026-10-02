@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import type { Provider, KeyEntry } from "../types.js";
 
@@ -13,7 +14,7 @@ export class ProviderRegistry {
   private healthState: Map<string, { consecutiveFailures: number; degradedAt?: string }> = new Map();
 
   constructor(configDir?: string) {
-    this.configDir = configDir ?? path.resolve(process.env.LLM_PROXY_HOME ?? "~/.llm-proxy");
+    this.configDir = configDir ?? path.join(os.homedir(), ".llm-proxy");
     this.filePath = path.join(this.configDir, "providers.json");
     this.load();
   }
