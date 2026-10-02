@@ -39,6 +39,10 @@ export class ProviderRegistry {
     fs.renameSync(tmpPath, this.filePath);
   }
 
+  persist(): void {
+    this.save();
+  }
+
   add(provider: Provider): void {
     this.providers.set(provider.id, provider);
     this.save();
