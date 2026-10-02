@@ -12,79 +12,96 @@
       margin: 0;
       padding: 2rem;
     }
-    h1 {
-      font-size: 1.5rem;
-      color: #4fc3f7;
-      margin-bottom: 1rem;
-    }
-    .toolbar {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.5rem;
-    }
+    h1 { font-size: 1.5rem; color: #4fc3f7; margin-bottom: 1rem; }
+    .section { margin-bottom: 1.5rem; }
+    .section h2 { font-size: 1.1rem; color: #4fc3f7; margin-bottom: 0.5rem; }
+    .toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
     button {
-      background: #4fc3f7;
-      color: #1a1a2e;
-      border: none;
-      padding: 0.5rem 1rem;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: 600;
+      background: #4fc3f7; color: #1a1a2e; border: none;
+      padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 600;
     }
-    button:hover {
-      background: #3ab4e8;
-    }
+    button:hover { background: #3ab4e8; }
+    button.danger { background: #c62828; color: #fff; }
+    button.danger:hover { background: #a11d1d; }
     .provider-card {
-      background: #16213e;
-      border-radius: 8px;
-      padding: 1rem;
-      margin-bottom: 1rem;
+      background: #16213e; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;
     }
-    .provider-card h2 {
-      font-size: 1.1rem;
-      color: #4fc3f7;
-      margin: 0 0 0.5rem;
-    }
-    .meta {
-      color: #888;
-      font-size: 0.85rem;
-      margin-bottom: 0.5rem;
-    }
-    .keys {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-      margin-top: 0.5rem;
-    }
-    .key-badge {
-      padding: 0.2rem 0.6rem;
-      border-radius: 4px;
-      font-size: 0.8rem;
-    }
+    .provider-card h3 { font-size: 1rem; color: #4fc3f7; margin: 0 0 0.5rem; }
+    .meta { color: #888; font-size: 0.85rem; margin-bottom: 0.5rem; }
+    .keys { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .key-badge { padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.8rem; }
     .key-active { background: #2e7d32; color: #a5d6a7; }
     .key-exhausted { background: #c62828; color: #ffcdd2; }
     .key-cooldown { background: #f9a825; color: #fff3e0; }
-    .sub-info {
-      margin-top: 0.5rem;
-      font-size: 0.85rem;
-      color: #aaa;
+    .sub-info { margin-top: 0.5rem; font-size: 0.85rem; color: #aaa; }
+    .empty { color: #666; font-style: italic; }
+    form { background: #16213e; border-radius: 8px; padding: 1rem; }
+    label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 0.3rem; }
+    input, select {
+      width: 100%; padding: 0.4rem 0.6rem; margin-bottom: 0.8rem;
+      background: #0f3460; color: #eee; border: 1px solid #2a4a7a; border-radius: 4px;
     }
-    .empty {
-      color: #666;
-      font-style: italic;
-    }
+    .row { display: flex; gap: 0.5rem; }
+    .row > * { flex: 1; }
+    .error { color: #c62828; font-size: 0.8rem; margin-top: 0.3rem; }
   </style>
 </head>
 <body>
-  <h1>LLM Proxy — Providers</h1>
-  <div class="toolbar">
-    <button id="refresh-btn">Refresh</button>
+  <h1>LLM Proxy</h1>
+
+  <div class="section">
+    <h2>Providers</h2>
+    <div class="toolbar">
+      <button id="refresh-btn">Refresh</button>
+      <button id="remove-btn" class="danger">Remove Selected</button>
+    </div>
+    <div id="providers-list"><p class="empty">Loading…</p></div>
   </div>
-  <div id="providers-list">
-    <p class="empty">Loading…</p>
+
+  <div class="section">
+    <h2>Add Provider</h2>
+    <form id="add-form">
+      <label>Provider ID *</label>
+      <input type="text" name="id" required />
+      <label>Name</label>
+      <input type="text" name="name" />
+      <label>Base URL *</label>
+      <input type="url" name="baseUrl" required />
+      <div class="row">
+        <div>
+          <label>API Format</label>
+          <select name="apiFormat">
+            <option value="openai">openai</option>
+            <option value="anthropic">anthropic</option>
+          </select>
+        </div>
+        <div>
+          <label>Models (comma-separated)</label>
+          <input type="text" name="models" />
+        </div>
+      </div>
+      <label>Key Value</label>
+      <input type="text" name="keyValue" />
+      <label>Subscription Type (optional)</label>
+      <select name="subType">
+        <option value="">None</option>
+        <option value="github_copilot">GitHub Copilot</option>
+        <option value="openai_subscription">OpenAI Subscription</option>
+        <option value="claude_subscription">Claude Subscription</option>
+        <option value="custom">Custom</option>
+      </select>
+      <label>Subscription Token (optional)</label>
+      <input type="text" name="subToken" />
+      <label>Refresh Token (optional)</label>
+      <input type="text" name="refreshToken" />
+      <div class="error" id="form-error"></div>
+      <button type="submit">Add Provider</button>
+    </form>
   </div>
 
   <script>
+    let selectedId = null;
+
     function renderProviders(providers) {
       const container = document.getElementById("providers-list");
       if (!providers || providers.length === 0) {
@@ -92,19 +109,25 @@
         return;
       }
       container.innerHTML = providers.map((p) => `
-        <div class="provider-card">
-          <h2>${p.name}</h2>
-          <div class="meta">URL: ${p.baseUrl} · Format: ${p.apiFormat}</div>
+        <div class="provider-card" data-id="${p.id}">
+          <h3>${p.name}</h3>
+          <div class="meta">ID: ${p.id} · URL: ${p.baseUrl} · Format: ${p.apiFormat}</div>
           <div class="keys">
             ${p.keys.map((k) => `<span class="key-badge key-${k.status}">${k.status}</span>`).join("")}
           </div>
           ${p.subscription ? `
-            <div class="sub-info">
-              Subscription: ${p.subscription.type} · Token: ${p.subscription.tokenMasked} · Expires: ${p.subscription.expiresAt ?? "unknown"}
-            </div>
+            <div class="sub-info">Subscription: ${p.subscription.type} · Token: ${p.subscription.tokenMasked} · Expires: ${p.subscription.expiresAt ?? "unknown"}</div>
           ` : ""}
         </div>
       `).join("");
+
+      container.querySelectorAll(".provider-card").forEach((card) => {
+        card.addEventListener("click", () => {
+          selectedId = card.dataset.id;
+          container.querySelectorAll(".provider-card").forEach((c) => c.style.outline = "none");
+          card.style.outline = "2px solid #4fc3f7";
+        });
+      });
     }
 
     async function loadProviders() {
@@ -113,6 +136,50 @@
     }
 
     document.getElementById("refresh-btn").addEventListener("click", loadProviders);
+
+    document.getElementById("remove-btn").addEventListener("click", async () => {
+      if (!selectedId) { alert("Select a provider first."); return; }
+      if (!confirm(`Remove provider "${selectedId}"?`)) return;
+      await window.ipc.invoke("providers:remove", selectedId);
+      selectedId = null;
+      loadProviders();
+    });
+
+    document.getElementById("add-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const fd = new FormData(form);
+      const id = fd.get("id");
+      const baseUrl = fd.get("baseUrl");
+
+      if (!id) { document.getElementById("form-error").textContent = "ID is required."; return; }
+      try { new URL(baseUrl); } catch { document.getElementById("form-error").textContent = "Base URL must be valid."; return; }
+
+      const models = (fd.get("models") || "").split(",").map(s => s.trim()).filter(Boolean);
+      const keyValue = fd.get("keyValue");
+      const subType = fd.get("subType");
+      const subToken = fd.get("subToken");
+      const refreshToken = fd.get("refreshToken");
+
+      const provider = {
+        id,
+        name: fd.get("name") || id,
+        baseUrl,
+        apiFormat: fd.get("apiFormat"),
+        models: models.length ? models : ["*"],
+        keys: keyValue ? [{ value: keyValue, status: "active" }] : [{ value: "", status: "active" }],
+      };
+      if (subType) {
+        provider.subscription = { type: subType, token: subToken || "" };
+        if (refreshToken) provider.subscription.refreshToken = refreshToken;
+      }
+
+      await window.ipc.invoke("providers:add", provider);
+      document.getElementById("form-error").textContent = "";
+      form.reset();
+      loadProviders();
+    });
+
     document.addEventListener("DOMContentLoaded", loadProviders);
   </script>
 </body>

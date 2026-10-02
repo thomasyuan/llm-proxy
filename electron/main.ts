@@ -9,11 +9,16 @@ let registry: ProviderRegistry | null = null;
 
 ipcMain.handle("app:ping", () => "pong");
 
-ipcMain.handle("providers:list", async () => {
+function getRegistry(): ProviderRegistry {
   if (!registry) {
     registry = new ProviderRegistry();
   }
-  return registry.list().map((p) => ({
+  return registry;
+}
+
+ipcMain.handle("providers:list", async () => {
+  const reg = getRegistry();
+  return reg.list().map((p) => ({
     id: p.id,
     name: p.name,
     baseUrl: p.baseUrl,
@@ -23,6 +28,18 @@ ipcMain.handle("providers:list", async () => {
       ? { type: p.subscription.type, tokenMasked: p.subscription.token.slice(0, 8) + "…", expiresAt: p.subscription.expiresAt ?? null }
       : null,
   }));
+});
+
+ipcMain.handle("providers:add", async (_event, providerData) => {
+  const reg = getRegistry();
+  reg.add(providerData);
+  return { ok: true };
+});
+
+ipcMain.handle("providers:remove", async (_event, id) => {
+  const reg = getRegistry();
+  reg.remove(id);
+  return { ok: true };
 });
 
 function createWindow(): void {
