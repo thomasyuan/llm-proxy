@@ -100,6 +100,17 @@ export class ProviderRegistry {
     return provider.keys.every((k: KeyEntry) => k.status !== "active");
   }
 
+  /**
+   * Check if a provider's subscription token is expired.
+   * Returns true if expired, false otherwise (including no subscription).
+   */
+  subscriptionExpired(providerId: string): boolean {
+    const provider = this.get(providerId);
+    if (!provider || !provider.subscription) return false;
+    if (!provider.subscription.expiresAt) return false;
+    return new Date(provider.subscription.expiresAt).getTime() < Date.now();
+  }
+
   private isCooldownExpired(key: KeyEntry): boolean {
     if (!key.failedAt) return false;
     const failed = new Date(key.failedAt).getTime();

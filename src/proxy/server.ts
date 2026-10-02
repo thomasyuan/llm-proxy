@@ -49,12 +49,11 @@ export class ProxyServer {
       return;
     }
 
-    const { provider, keyIndex, format: _format } = decision;
+    const { provider, keyIndex, format: _format, authHeader } = decision;
     const targetUrl = new URL(provider.baseUrl);
-    const apiKey = provider.keys[keyIndex].value;
 
     const headers: Record<string, string> = {
-      "Authorization": `Bearer ${apiKey}`,
+      "Authorization": authHeader,
       "Content-Type": req.headers["content-type"] ?? "application/json",
     };
 

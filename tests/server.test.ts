@@ -148,4 +148,73 @@ describe("ProxyServer", () => {
 
     await new Promise((resolve) => mockUpstream.close(resolve));
   });
+
+  it("should use subscription token for auth", async () => {
+    const subProvider = makeProvider({
+      baseUrl: `http://127.0.0.1:${upstreamPort}/v1`,
+      subscription: { type: "github_copilot" as const, token: "sub-token-abc" },
+    });
+    registry.remove("test");
+    registry.add(subProvider);
+
+    let capturedAuth = "";
+    const subUpstream = http.createServer((req, res) => {
+      capturedAuth = req.headers["authorization"] ?? "";
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    const subPort = ++portCounter;
+    await new Promise<void>((resolve, reject) => {
+      subUpstream.once("error", reject);
+      subUpstream.listen(subPort, "127.0.0.1", () => resolve());
+    });
+
+    registry.remove("test");
+    registry.add(makeProvider({
+      baseUrl: `http://127.0.0.1:${subPort}/v1`,
+      subscription: { type: "github_copilot" as const, token: "sub-token-abc" },
+    }));
+
+    await server.start();
+
+    const result = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = http.request({ hostname: "127.0.0.1", port: proxyPort, path: "/v1", method: "POST" }, (res) => {
+        res.on("data", () => {});
+        res.on("end", () => resolve({ status: res.statusCode! }));
+      });
+      req.on("error", reject);
+      req.end("{}");
+    });
+
+    expect(result.status).toBe(200);
+    expect(capturedAuth).toBe("Bearer sub-token-abc");
+
+    await new Promise((resolve) => subUpstream.close(resolve));
+  });
+
+  it("should return 503 when subscription is expired", async () => {
+    const expiredProvider = makeProvider({
+      baseUrl: `http://127.0.0.1:${upstreamPort}/v1`,
+      subscription: {
+        type: "openai_subscription" as const,
+        token: "expired-token",
+        expiresAt: new Date(Date.now() - 60000).toISOString(),
+      },
+    });
+    registry.remove("test");
+    registry.add(expiredProvider);
+
+    await server.start();
+
+    const result = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = http.request({ hostname: "127.0.0.1", port: proxyPort, path: "/v1", method: "POST" }, (res) => {
+        res.on("data", () => {});
+        res.on("end", () => resolve({ status: res.statusCode! }));
+      });
+      req.on("error", reject);
+      req.end("{}");
+    });
+
+    expect(result.status).toBe(503);
+  });
 });
