@@ -217,4 +217,50 @@ describe("ProxyServer", () => {
 
     expect(result.status).toBe(503);
   });
+
+  it("should auto-refresh expired subscription token", async () => {
+    const refreshPort = ++portCounter;
+    const mockRefresh = http.createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ access_token: "new-token-xyz", expires_in: 3600 }));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      mockRefresh.once("error", reject);
+      mockRefresh.listen(refreshPort, "127.0.0.1", () => resolve());
+    });
+
+    const refreshProvider = makeProvider({
+      baseUrl: `http://127.0.0.1:${upstreamPort}/v1`,
+      subscription: {
+        type: "openai_subscription" as const,
+        token: "old-expired-token",
+        refreshToken: "refresh-abc",
+        refreshUrl: `http://127.0.0.1:${refreshPort}/oauth/token`,
+        expiresAt: new Date(Date.now() - 60000).toISOString(),
+      },
+    });
+    registry.remove("test");
+    registry.add(refreshProvider);
+
+    await server.start();
+
+    const result = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = http.request({ hostname: "127.0.0.1", port: proxyPort, path: "/v1", method: "POST" }, (res) => {
+        res.on("data", () => {});
+        res.on("end", () => resolve({ status: res.statusCode! }));
+      });
+      req.on("error", reject);
+      req.end("{}");
+    });
+
+    expect(result.status).toBe(200);
+    const provider = registry.get("test")!;
+    expect(provider.subscription!.token).toBe("new-token-xyz");
+
+    await new Promise((resolve) => mockRefresh.close(resolve));
+  });
 });

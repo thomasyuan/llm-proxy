@@ -41,7 +41,7 @@ export class ProxyServer {
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await readBody(req);
-    const decision: RoutingDecision | null = this.router.resolve();
+    const decision: RoutingDecision | null = await this.router.resolve();
 
     if (!decision) {
       res.writeHead(503, { "Content-Type": "application/json" });

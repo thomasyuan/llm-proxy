@@ -12,6 +12,7 @@ export interface Subscription {
   type: SubscriptionType;
   token: string;
   refreshToken?: string;
+  refreshUrl?: string;
   expiresAt?: string;
 }
 
