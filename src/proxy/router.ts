@@ -5,42 +5,46 @@ import type { ProviderRegistry } from "../providers/registry.js";
 
 export class Router {
   private registry: ProviderRegistry;
-  private activeProviderId: string;
+  private providerOrder: string[];
 
-  constructor(registry: ProviderRegistry, activeProviderId: string) {
+  constructor(registry: ProviderRegistry, providerOrder: string[]) {
     this.registry = registry;
-    this.activeProviderId = activeProviderId;
+    this.providerOrder = [...providerOrder];
   }
 
-  setProvider(id: string): void {
-    this.activeProviderId = id;
+  setProviders(ids: string[]): void {
+    this.providerOrder = [...ids];
   }
 
   async resolve(): Promise<RoutingDecision | null> {
-    const provider: Provider | undefined = this.registry.get(this.activeProviderId);
-    if (!provider) return null;
+    for (const id of this.providerOrder) {
+      const provider: Provider | undefined = this.registry.get(id);
+      if (!provider) continue;
 
-    if (provider.subscription && this.registry.subscriptionExpired(this.activeProviderId)) {
-      const refreshed = await this.tryRefreshSubscription(provider);
-      if (!refreshed) return null;
+      if (provider.subscription && this.registry.subscriptionExpired(id)) {
+        const refreshed = await this.tryRefreshSubscription(provider);
+        if (!refreshed) continue;
+      }
+
+      const keyIndex = this.registry.nextKeyIndex(id);
+      if (keyIndex === -1) continue;
+
+      let authHeader: string;
+      if (provider.subscription) {
+        authHeader = `Bearer ${provider.subscription.token}`;
+      } else {
+        authHeader = `Bearer ${provider.keys[keyIndex].value}`;
+      }
+
+      return {
+        providerId: id,
+        provider,
+        keyIndex,
+        format: provider.apiFormat,
+        authHeader,
+      };
     }
-
-    const keyIndex = this.registry.nextKeyIndex(this.activeProviderId);
-    if (keyIndex === -1) return null;
-
-    let authHeader: string;
-    if (provider.subscription) {
-      authHeader = `Bearer ${provider.subscription.token}`;
-    } else {
-      authHeader = `Bearer ${provider.keys[keyIndex].value}`;
-    }
-
-    return {
-      provider,
-      keyIndex,
-      format: provider.apiFormat,
-      authHeader,
-    };
+    return null;
   }
 
   private async tryRefreshSubscription(provider: Provider): Promise<boolean> {
@@ -98,11 +102,7 @@ export class Router {
     });
   }
 
-  handleFailure(failedKeyIndex: number): void {
-    this.registry.rotateKey(this.activeProviderId, failedKeyIndex);
-  }
-
-  isExhausted(): boolean {
-    return this.registry.allExhausted(this.activeProviderId);
+  handleFailure(providerId: string, failedKeyIndex: number): void {
+    this.registry.rotateKey(providerId, failedKeyIndex);
   }
 }

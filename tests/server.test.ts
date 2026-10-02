@@ -35,7 +35,7 @@ describe("ProxyServer", () => {
     upstreamPort = ++portCounter;
     registry = new ProviderRegistry(tmpDir);
     registry.add(makeProvider({ baseUrl: `http://127.0.0.1:${upstreamPort}/v1` }));
-    router = new Router(registry, "test");
+    router = new Router(registry, ["test"]);
     server = new ProxyServer(router, registry, { host: "127.0.0.1", port: proxyPort });
 
     upstream = http.createServer((req, res) => {
@@ -84,7 +84,7 @@ describe("ProxyServer", () => {
 
   it("should return 503 when no provider available", async () => {
     registry.remove("test");
-    router.setProvider("nonexistent");
+    router.setProviders(["nonexistent"]);
     await server.start();
 
     const result = await new Promise<{ status: number }>((resolve, reject) => {
@@ -105,7 +105,7 @@ describe("ProxyServer", () => {
     expect(result.status).toBe(503);
   });
 
-  it("should rotate key on upstream 429", async () => {
+  it("should fail over to next key on upstream 429", async () => {
     const mockUpstreamPort = ++portCounter;
     let requestCount = 0;
     const mockUpstream = http.createServer((req, res) => {
@@ -129,7 +129,7 @@ describe("ProxyServer", () => {
       ]});
     registry.remove("test");
     registry.add(p2);
-    router.setProvider("test");
+    router.setProviders(["test"]);
 
     await server.start();
 
@@ -142,7 +142,7 @@ describe("ProxyServer", () => {
       req.end("{}");
     });
 
-    expect(r1.status).toBe(429);
+    expect(r1.status).toBe(200);
     const provider = registry.get("test")!;
     expect(provider.keys[0].status).toBe("exhausted");
 
@@ -262,5 +262,51 @@ describe("ProxyServer", () => {
     expect(provider.subscription!.token).toBe("new-token-xyz");
 
     await new Promise((resolve) => mockRefresh.close(resolve));
+  });
+
+  it("should fail over to next provider on 429", async () => {
+    const failPort = ++portCounter;
+    const okPort = ++portCounter;
+
+    const failUpstream = http.createServer((req, res) => {
+      res.writeHead(429, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "rate limited" }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      failUpstream.once("error", reject);
+      failUpstream.listen(failPort, "127.0.0.1", () => resolve());
+    });
+
+    const okUpstream = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      okUpstream.once("error", reject);
+      okUpstream.listen(okPort, "127.0.0.1", () => resolve());
+    });
+
+    const providerA = makeProvider({ id: "a", baseUrl: `http://127.0.0.1:${failPort}/v1` });
+    const providerB = makeProvider({ id: "b", baseUrl: `http://127.0.0.1:${okPort}/v1` });
+    registry.remove("test");
+    registry.add(providerA);
+    registry.add(providerB);
+    router.setProviders(["a", "b"]);
+
+    await server.start();
+
+    const result = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = http.request({ hostname: "127.0.0.1", port: proxyPort, path: "/v1", method: "POST" }, (res) => {
+        res.on("data", () => {});
+        res.on("end", () => resolve({ status: res.statusCode! }));
+      });
+      req.on("error", reject);
+      req.end("{}");
+    });
+
+    expect(result.status).toBe(200);
+
+    await new Promise((resolve) => failUpstream.close(resolve));
+    await new Promise((resolve) => okUpstream.close(resolve));
   });
 });
