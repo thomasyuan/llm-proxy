@@ -8,7 +8,7 @@ const ACTIVE_PROVIDER = process.env.LLM_PROXY_ACTIVE_PROVIDER ?? "default";
 
 async function main(): Promise<void> {
   const registry = new ProviderRegistry();
-  const router = new Router(registry, ACTIVE_PROVIDER);
+  const router = new Router(registry, [ACTIVE_PROVIDER]);
   const server = new ProxyServer(router, registry, { host: HOST, port: PORT });
 
   await server.start();

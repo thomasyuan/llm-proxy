@@ -42,6 +42,7 @@ export interface ProxyConfig {
 }
 
 export interface RoutingDecision {
+  providerId: string;
   provider: Provider;
   keyIndex: number;
   format: ApiFormat;

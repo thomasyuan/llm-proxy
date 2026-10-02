@@ -41,55 +41,70 @@ export class ProxyServer {
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await readBody(req);
-    const decision: RoutingDecision | null = await this.router.resolve();
+    let lastError: { status: number; data: Buffer } | null = null;
 
-    if (!decision) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "No active provider available" }));
-      return;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const decision: RoutingDecision | null = await this.router.resolve();
+      if (!decision) {
+        if (lastError) {
+          res.writeHead(lastError.status, { "Content-Type": "application/json" });
+          res.end(lastError.data);
+        } else {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "No active provider available" }));
+        }
+        return;
+      }
+
+      const { providerId, provider, keyIndex, authHeader } = decision;
+      const targetUrl = new URL(provider.baseUrl);
+
+      const headers: Record<string, string> = {
+        "Authorization": authHeader,
+        "Content-Type": req.headers["content-type"] ?? "application/json",
+      };
+
+      const isHttps = targetUrl.protocol === "https:";
+      const mod = isHttps ? require("https") : http;
+
+      const result = await this.forwardRequest(mod, {
+        hostname: targetUrl.hostname,
+        port: targetUrl.port || (isHttps ? 443 : 80),
+        path: targetUrl.pathname + targetUrl.search,
+        method: req.method,
+        headers,
+      }, body);
+
+      if (result.status < 400) {
+        res.writeHead(result.status, { "Content-Type": result.headers["content-type"] ?? "application/json" });
+        res.end(result.data);
+        return;
+      }
+
+      this.router.handleFailure(providerId, keyIndex);
+      lastError = { status: result.status, data: result.data };
     }
 
-    const { provider, keyIndex, format: _format, authHeader } = decision;
-    const targetUrl = new URL(provider.baseUrl);
+    if (lastError) {
+      res.writeHead(lastError.status, { "Content-Type": "application/json" });
+      res.end(lastError.data);
+    }
+  }
 
-    const headers: Record<string, string> = {
-      "Authorization": authHeader,
-      "Content-Type": req.headers["content-type"] ?? "application/json",
-    };
-
-    const isHttps = targetUrl.protocol === "https:";
-    const mod = isHttps ? require("https") : http;
-
-    const upstreamReq = mod.request({
-      hostname: targetUrl.hostname,
-      port: targetUrl.port || (isHttps ? 443 : 80),
-      path: targetUrl.pathname + targetUrl.search,
-      method: req.method,
-      headers,
-    }, (upstreamRes: http.IncomingMessage) => {
-      const chunks: Buffer[] = [];
-      upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
-      upstreamRes.on("end", () => {
-        const data = Buffer.concat(chunks);
-        const status = upstreamRes.statusCode ?? 500;
-        if (status >= 400) {
-          this.router.handleFailure(keyIndex);
-          res.writeHead(status, { "Content-Type": "application/json" });
-          res.end(data);
-          return;
-        }
-        res.writeHead(200, { "Content-Type": upstreamRes.headers["content-type"] ?? "application/json" });
-        res.end(data);
+  private forwardRequest(mod: typeof http | typeof import("https"), options: Record<string, unknown>, body: string): Promise<{ status: number; data: Buffer; headers: Record<string, string> }> {
+    return new Promise((resolve) => {
+      const upstreamReq = mod.request(options as never, (upstreamRes: http.IncomingMessage) => {
+        const chunks: Buffer[] = [];
+        upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
+        upstreamRes.on("end", () => {
+          resolve({ status: upstreamRes.statusCode ?? 500, data: Buffer.concat(chunks), headers: upstreamRes.headers as Record<string, string> });
+        });
       });
+      upstreamReq.on("error", (err: Error) => {
+        resolve({ status: 502, data: Buffer.from(JSON.stringify({ error: "Upstream request failed", detail: err.message })), headers: { "content-type": "application/json" } });
+      });
+      upstreamReq.end(body);
     });
-
-    upstreamReq.on("error", (err: Error) => {
-      this.router.handleFailure(keyIndex);
-      res.writeHead(502, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Upstream request failed", detail: err.message }));
-    });
-
-    upstreamReq.end(body);
   }
 
   stop(): Promise<void> {
