@@ -16,10 +16,12 @@ export class Router {
     this.providerOrder = [...ids];
   }
 
-  async resolve(): Promise<RoutingDecision | null> {
+  async resolve(model?: string): Promise<RoutingDecision | null> {
     for (const id of this.providerOrder) {
       const provider: Provider | undefined = this.registry.get(id);
       if (!provider) continue;
+
+      if (model && !provider.models.includes(model)) continue;
 
       if (provider.subscription && this.registry.subscriptionExpired(id)) {
         const refreshed = await this.tryRefreshSubscription(provider);
