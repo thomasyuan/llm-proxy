@@ -375,4 +375,63 @@ describe("ProxyServer", () => {
 
     await new Promise((resolve) => mockUpstream.close(resolve));
   });
+
+  it("should degrade provider after 3 consecutive failures and skip it", async () => {
+    const failPort = ++portCounter;
+    const okPort = ++portCounter;
+
+    // Upstream that always returns 500
+    const failUpstream = http.createServer((req, res) => {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "internal error" }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      failUpstream.once("error", reject);
+      failUpstream.listen(failPort, "127.0.0.1", () => resolve());
+    });
+
+    // Upstream that returns 200 (backup provider)
+    const okUpstream = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      okUpstream.once("error", reject);
+      okUpstream.listen(okPort, "127.0.0.1", () => resolve());
+    });
+
+    const providerA = makeProvider({ id: "a", baseUrl: `http://127.0.0.1:${failPort}/v1`, keys: [
+      { value: "key-a1", status: "active" },
+      { value: "key-a2", status: "active" },
+      { value: "key-a3", status: "active" },
+    ]});
+    const providerB = makeProvider({ id: "b", baseUrl: `http://127.0.0.1:${okPort}/v1` });
+    registry.remove("test");
+    registry.add(providerA);
+    registry.add(providerB);
+    router.setProviders(["a", "b"]);
+
+    await server.start();
+
+    // Make 3 requests that all hit provider A (which always 500s)
+    for (let i = 0; i < 3; i++) {
+      const r = await new Promise<{ status: number }>((resolve, reject) => {
+        const req = http.request({ hostname: "127.0.0.1", port: proxyPort, path: "/v1", method: "POST" }, (res) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve({ status: res.statusCode! }));
+        });
+        req.on("error", reject);
+        req.end("{}");
+      });
+      // Each request should eventually succeed via provider B after A is degraded
+      expect(r.status).toBe(200);
+    }
+
+    // After 3 failures, provider A should be degraded
+    expect(registry.getFailureCount("a")).toBeGreaterThanOrEqual(3);
+    expect(registry.isDegraded("a")).toBe(true);
+
+    await new Promise((resolve) => failUpstream.close(resolve));
+    await new Promise((resolve) => okUpstream.close(resolve));
+  });
 });

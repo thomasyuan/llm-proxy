@@ -85,6 +85,7 @@ export class ProxyServer {
       }, body);
 
       if (result.status < 400) {
+        this.router.handleSuccess(providerId);
         res.writeHead(result.status, { "Content-Type": result.headers["content-type"] ?? "application/json" });
         res.end(result.data);
         return;
