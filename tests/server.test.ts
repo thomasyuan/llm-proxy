@@ -18,31 +18,39 @@ function makeProvider(overrides?: Partial<Provider>): Provider {
   };
 }
 
+let portCounter = 8900;
+
 describe("ProxyServer", () => {
   let tmpDir: string;
   let registry: ProviderRegistry;
   let router: Router;
   let server: ProxyServer;
   let upstream: http.Server;
+  let proxyPort: number;
+  let upstreamPort: number;
 
   beforeEach(async () => {
     tmpDir = `/tmp/llm-proxy-server-test-${Date.now()}`;
+    proxyPort = ++portCounter;
+    upstreamPort = ++portCounter;
     registry = new ProviderRegistry(tmpDir);
-    registry.add(makeProvider());
+    registry.add(makeProvider({ baseUrl: `http://127.0.0.1:${upstreamPort}/v1` }));
     router = new Router(registry, "test");
-    server = new ProxyServer(router, registry, { host: "127.0.0.1", port: 8901 });
+    server = new ProxyServer(router, registry, { host: "127.0.0.1", port: proxyPort });
 
-    // Mock upstream server
     upstream = http.createServer((req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
     });
-    upstream.listen(9999);
+    await new Promise<void>((resolve, reject) => {
+      upstream.once("error", reject);
+      upstream.listen(upstreamPort, "127.0.0.1", () => resolve());
+    });
   });
 
   afterEach(async () => {
     await server.stop();
-    upstream.close();
+    await new Promise((resolve) => upstream.close(resolve));
   });
 
   it("should start and stop cleanly", async () => {
@@ -57,7 +65,7 @@ describe("ProxyServer", () => {
     const result = await new Promise<{ status: number; body: string }>((resolve, reject) => {
       const req = http.request({
         hostname: "127.0.0.1",
-        port: 8901,
+        port: proxyPort,
         path: "/v1/chat/completions",
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -82,7 +90,7 @@ describe("ProxyServer", () => {
     const result = await new Promise<{ status: number }>((resolve, reject) => {
       const req = http.request({
         hostname: "127.0.0.1",
-        port: 8901,
+        port: proxyPort,
         path: "/v1/chat/completions",
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -98,17 +106,7 @@ describe("ProxyServer", () => {
   });
 
   it("should rotate key on upstream 429", async () => {
-    // Set up two keys, first one will get a 429
-    const p = makeProvider({
-      keys: [
-        { value: "key-1", status: "active" },
-        { value: "key-2", status: "active" },
-      ],
-    });
-    registry.remove("test");
-    registry.add(p);
-
-    // Mock upstream that returns 429 for first key, 200 for second
+    const mockUpstreamPort = ++portCounter;
     let requestCount = 0;
     const mockUpstream = http.createServer((req, res) => {
       requestCount++;
@@ -120,19 +118,23 @@ describe("ProxyServer", () => {
         res.end(JSON.stringify({ ok: true }));
       }
     });
-    mockUpstream.listen(9998);
+    await new Promise<void>((resolve, reject) => {
+      mockUpstream.once("error", reject);
+      mockUpstream.listen(mockUpstreamPort, "127.0.0.1", () => resolve());
+    });
 
-    // Update provider to use mock upstream
-    const p2 = makeProvider({ baseUrl: "http://127.0.0.1:9998/v1" });
+    const p2 = makeProvider({ baseUrl: `http://127.0.0.1:${mockUpstreamPort}/v1`, keys: [
+        { value: "key-1", status: "active" },
+        { value: "key-2", status: "active" },
+      ]});
     registry.remove("test");
     registry.add(p2);
     router.setProvider("test");
 
     await server.start();
 
-    // First request should get 429 and trigger rotation
     const r1 = await new Promise<{ status: number }>((resolve, reject) => {
-      const req = http.request({ hostname: "127.0.1", port: 8901, path: "/v1", method: "POST" }, (res) => {
+      const req = http.request({ hostname: "127.0.0.1", port: proxyPort, path: "/v1", method: "POST" }, (res) => {
         res.on("data", () => {});
         res.on("end", () => resolve({ status: res.statusCode! }));
       });
@@ -141,10 +143,9 @@ describe("ProxyServer", () => {
     });
 
     expect(r1.status).toBe(429);
-    // Key should now be exhausted
     const provider = registry.get("test")!;
     expect(provider.keys[0].status).toBe("exhausted");
 
-    mockUpstream.close();
+    await new Promise((resolve) => mockUpstream.close(resolve));
   });
 });
