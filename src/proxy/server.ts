@@ -41,14 +41,23 @@ export class ProxyServer {
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await readBody(req);
+    let model: string | undefined;
+    try {
+      const parsed = JSON.parse(body);
+      model = parsed.model;
+    } catch { /* no model in body */ }
+
     let lastError: { status: number; data: Buffer } | null = null;
 
     for (let attempt = 0; attempt < 5; attempt++) {
-      const decision: RoutingDecision | null = await this.router.resolve();
+      const decision: RoutingDecision | null = await this.router.resolve(model);
       if (!decision) {
         if (lastError) {
           res.writeHead(lastError.status, { "Content-Type": "application/json" });
           res.end(lastError.data);
+        } else if (model) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: `No provider supports model "${model}"` }));
         } else {
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "No active provider available" }));

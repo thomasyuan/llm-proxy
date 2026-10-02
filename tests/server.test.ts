@@ -309,4 +309,70 @@ describe("ProxyServer", () => {
     await new Promise((resolve) => failUpstream.close(resolve));
     await new Promise((resolve) => okUpstream.close(resolve));
   });
+
+  it("should return 404 when no provider supports the requested model", async () => {
+    const noModelProvider = makeProvider({ models: ["other-model"] });
+    registry.remove("test");
+    registry.add(noModelProvider);
+
+    await server.start();
+
+    const result = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => resolve({ status: res.statusCode!, body: Buffer.concat(chunks).toString() }));
+      });
+      req.on("error", reject);
+      req.end(JSON.stringify({ model: "m1", messages: [] }));
+    });
+
+    expect(result.status).toBe(404);
+    expect(JSON.parse(result.body)).toEqual({ error: 'No provider supports model "m1"' });
+  });
+
+  it("should route to provider that supports the requested model", async () => {
+    const okPort = ++portCounter;
+    const mockUpstream = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      mockUpstream.once("error", reject);
+      mockUpstream.listen(okPort, "127.0.0.1", () => resolve());
+    });
+
+    const supportedProvider = makeProvider({ models: ["m1"], baseUrl: `http://127.0.0.1:${okPort}/v1` });
+    registry.remove("test");
+    registry.add(supportedProvider);
+
+    await server.start();
+
+    const result = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => resolve({ status: res.statusCode!, body: Buffer.concat(chunks).toString() }));
+      });
+      req.on("error", reject);
+      req.end(JSON.stringify({ model: "m1", messages: [] }));
+    });
+
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({ ok: true });
+
+    await new Promise((resolve) => mockUpstream.close(resolve));
+  });
 });
