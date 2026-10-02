@@ -3,8 +3,11 @@
   "version": "0.1.0",
   "description": "Local LLM proxy server with multi-provider failover and app config management",
   "main": "dist/index.js",
+  "bin": {
+    "llm-proxy": "./dist/index.js"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/add-shebang.js",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "electron": "electron electron/main.ts",
