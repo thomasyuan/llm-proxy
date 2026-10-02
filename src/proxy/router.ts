@@ -18,13 +18,25 @@ export class Router {
     const provider: Provider | undefined = this.registry.get(this.activeProviderId);
     if (!provider) return null;
 
+    if (provider.subscription && this.registry.subscriptionExpired(this.activeProviderId)) {
+      return null;
+    }
+
     const keyIndex = this.registry.nextKeyIndex(this.activeProviderId);
     if (keyIndex === -1) return null;
+
+    let authHeader: string;
+    if (provider.subscription) {
+      authHeader = `Bearer ${provider.subscription.token}`;
+    } else {
+      authHeader = `Bearer ${provider.keys[keyIndex].value}`;
+    }
 
     return {
       provider,
       keyIndex,
       format: provider.apiFormat,
+      authHeader,
     };
   }
 
