@@ -15,7 +15,7 @@
     h1 { font-size: 1.5rem; color: #4fc3f7; margin-bottom: 1rem; }
     .section { margin-bottom: 1.5rem; }
     .section h2 { font-size: 1.1rem; color: #4fc3f7; margin-bottom: 0.5rem; }
-    .toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; align-items: center; }
     button {
       background: #4fc3f7; color: #1a1a2e; border: none;
       padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 600;
@@ -23,8 +23,12 @@
     button:hover { background: #3ab4e8; }
     button.danger { background: #c62828; color: #fff; }
     button.danger:hover { background: #a11d1d; }
+    select {
+      padding: 0.4rem 0.6rem; background: #0f3460; color: #eee;
+      border: 1px solid #2a4a7a; border-radius: 4px; font-size: 0.9rem;
+    }
     .provider-card {
-      background: #16213e; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;
+      background: #16213e; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; cursor: pointer;
     }
     .provider-card h3 { font-size: 1rem; color: #4fc3f7; margin: 0 0 0.5rem; }
     .meta { color: #888; font-size: 0.85rem; margin-bottom: 0.5rem; }
@@ -44,10 +48,25 @@
     .row { display: flex; gap: 0.5rem; }
     .row > * { flex: 1; }
     .error { color: #c62828; font-size: 0.8rem; margin-top: 0.3rem; }
+    .log-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .log-table th, .log-table td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid #2a4a7a; }
+    .log-table th { color: #4fc3f7; }
+    .log-fail { color: #c62828; font-weight: 600; }
+    .log-ok { color: #a5d6a7; }
+    .active-label { font-size: 0.9rem; color: #aaa; }
   </style>
 </head>
 <body>
   <h1>LLM Proxy</h1>
+
+  <div class="section">
+    <h2>Active Provider</h2>
+    <div class="toolbar">
+      <span class="active-label">Switch to:</span>
+      <select id="active-provider-select"></select>
+      <button id="set-active-btn">Apply</button>
+    </div>
+  </div>
 
   <div class="section">
     <h2>Providers</h2>
@@ -99,15 +118,32 @@
     </form>
   </div>
 
+  <div class="section">
+    <h2>Request Log</h2>
+    <div class="toolbar">
+      <button id="clear-log-btn" class="danger">Clear Log</button>
+    </div>
+    <table class="log-table" id="log-table">
+      <thead>
+        <tr><th>Time</th><th>Provider</th><th>Model</th><th>Status</th><th>Latency</th></tr>
+      </thead>
+      <tbody id="log-body"></tbody>
+    </table>
+  </div>
+
   <script>
     let selectedId = null;
+    let refreshInterval = null;
 
     function renderProviders(providers) {
       const container = document.getElementById("providers-list");
+      const select = document.getElementById("active-provider-select");
       if (!providers || providers.length === 0) {
         container.innerHTML = '<p class="empty">No providers registered.</p>';
+        select.innerHTML = '<option value="">None</option>';
         return;
       }
+      select.innerHTML = providers.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
       container.innerHTML = providers.map((p) => `
         <div class="provider-card" data-id="${p.id}">
           <h3>${p.name}</h3>
@@ -130,12 +166,40 @@
       });
     }
 
+    function renderLog(entries) {
+      const tbody = document.getElementById("log-body");
+      if (!entries || entries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">No requests logged.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = entries.map((e) => `
+        <tr>
+          <td>${new Date(e.timestamp).toLocaleTimeString()}</td>
+          <td>${e.provider}</td>
+          <td>${e.model || "—"}</td>
+          <td class="${e.status >= 400 ? 'log-fail' : 'log-ok'}">${e.status}</td>
+          <td>${e.latencyMs}ms</td>
+        </tr>
+      `).join("");
+    }
+
     async function loadProviders() {
       const data = await window.ipc.invoke("providers:list");
       renderProviders(data);
     }
 
+    async function loadLog() {
+      const data = await window.ipc.invoke("logs:get");
+      renderLog(data);
+    }
+
     document.getElementById("refresh-btn").addEventListener("click", loadProviders);
+
+    document.getElementById("set-active-btn").addEventListener("click", async () => {
+      const id = document.getElementById("active-provider-select").value;
+      if (!id) return;
+      await window.ipc.invoke("providers:setActive", id);
+    });
 
     document.getElementById("remove-btn").addEventListener("click", async () => {
       if (!selectedId) { alert("Select a provider first."); return; }
@@ -143,6 +207,11 @@
       await window.ipc.invoke("providers:remove", selectedId);
       selectedId = null;
       loadProviders();
+    });
+
+    document.getElementById("clear-log-btn").addEventListener("click", async () => {
+      await window.ipc.invoke("logs:clear");
+      loadLog();
     });
 
     document.getElementById("add-form").addEventListener("submit", async (e) => {
@@ -180,7 +249,20 @@
       loadProviders();
     });
 
-    document.addEventListener("DOMContentLoaded", loadProviders);
+    function startAutoRefresh() {
+      if (refreshInterval) clearInterval(refreshInterval);
+      refreshInterval = setInterval(() => {
+        if (document.hasFocus()) {
+          loadLog();
+        }
+      }, 2000);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      loadProviders();
+      loadLog();
+      startAutoRefresh();
+    });
   </script>
 </body>
 </html>
