@@ -6,6 +6,8 @@ const MAIN_WINDOW_TITLE = "LLM Proxy";
 
 let mainWindow: BrowserWindow | null = null;
 let registry: ProviderRegistry | null = null;
+let activeProviderId: string = "default";
+const requestLog: Array<{ timestamp: string; provider: string; model: string; status: number; latencyMs: number }> = [];
 
 ipcMain.handle("app:ping", () => "pong");
 
@@ -39,6 +41,20 @@ ipcMain.handle("providers:add", async (_event, providerData) => {
 ipcMain.handle("providers:remove", async (_event, id) => {
   const reg = getRegistry();
   reg.remove(id);
+  return { ok: true };
+});
+
+ipcMain.handle("providers:setActive", async (_event, id) => {
+  activeProviderId = id;
+  return { ok: true, activeProviderId };
+});
+
+ipcMain.handle("logs:get", async () => {
+  return [...requestLog];
+});
+
+ipcMain.handle("logs:clear", async () => {
+  requestLog.length = 0;
   return { ok: true };
 });
 
