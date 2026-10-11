@@ -16,6 +16,10 @@ export class Router {
     this.providerOrder = [...ids];
   }
 
+  getProviderOrder(): string[] {
+    return [...this.providerOrder];
+  }
+
   async resolve(model?: string): Promise<RoutingDecision | null> {
     for (const id of this.providerOrder) {
       const provider: Provider | undefined = this.registry.get(id);

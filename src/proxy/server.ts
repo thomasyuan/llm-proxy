@@ -40,6 +40,14 @@ export class ProxyServer {
   }
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // Handle /v1/models discovery
+    if (req.url === "/v1/models" || req.url === "/models") {
+      const models = await this.collectModels();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ object: "list", data: models }));
+      return;
+    }
+
     const body = await readBody(req);
     let model: string | undefined;
     try {
@@ -112,6 +120,69 @@ export class ProxyServer {
       res.writeHead(lastError.status, { "Content-Type": "application/json" });
       res.end(lastError.data);
     }
+  }
+
+  private async collectModels(): Promise<Array<{ id: string; object: string }>> {
+    const seen = new Set<string>();
+    for (const id of this.router.getProviderOrder()) {
+      const provider = this.registry.get(id);
+      if (!provider) continue;
+      if (this.registry.isDegraded(id)) continue;
+      for (const m of provider.models) {
+        if (m === "*") {
+          seen.add(`${id}:*`);
+        } else {
+          seen.add(m);
+        }
+      }
+    }
+    const results: Array<{ id: string; object: string }> = [];
+    for (const m of seen) {
+      if (m.endsWith(":*")) {
+        const providerId = m.slice(0, -2);
+        const provider = this.registry.get(providerId);
+        if (provider) {
+          try {
+            const url = new URL(provider.baseUrl);
+            const mod = url.protocol === "https:" ? require("https") : http;
+            const upstreamModels = await this.fetchUpstreamModels(mod, url);
+            for (const um of upstreamModels) {
+              results.push({ id: um, object: "model" });
+            }
+          } catch {
+            // skip
+          }
+        }
+      } else {
+        results.push({ id: m, object: "model" });
+      }
+    }
+    return results;
+  }
+
+  private fetchUpstreamModels(mod: typeof http | typeof import("https"), baseUrl: URL): Promise<string[]> {
+    const path = baseUrl.pathname.replace(/\/$/, "") + "/models";
+    return new Promise((resolve) => {
+      const req = mod.request({
+        hostname: baseUrl.hostname,
+        port: baseUrl.port || (baseUrl.protocol === "https:" ? 443 : 80),
+        path,
+        method: "GET",
+      }, (res: http.IncomingMessage) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          try {
+            const data = JSON.parse(Buffer.concat(chunks).toString());
+            resolve((data.data ?? []).map((m: { id: string }) => m.id));
+          } catch {
+            resolve([]);
+          }
+        });
+      });
+      req.on("error", () => resolve([]));
+      req.end();
+    });
   }
 
   private forwardRequest(mod: typeof http | typeof import("https"), options: Record<string, unknown>, body: string): Promise<{ status: number; data: Buffer; headers: Record<string, string> }> {
