@@ -94,6 +94,7 @@ export class ProviderRegistry {
     const provider = this.get(providerId);
     if (!provider) return;
     const key = provider.keys[failedIndex];
+    if (!key) return;
     key.status = "exhausted";
     key.failedAt = new Date().toISOString();
     this.save();

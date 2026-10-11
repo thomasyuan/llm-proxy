@@ -68,10 +68,23 @@ export class ProxyServer {
       const { providerId, provider, keyIndex, authHeader } = decision;
       const targetUrl = new URL(provider.baseUrl);
 
+      // Forward to provider baseUrl + original request path
+      const reqPath = req.url ?? "/";
+      let forwardPath: string;
+      if (reqPath.startsWith("/v1/")) {
+        // Client already includes /v1 prefix — replace provider's /v1 if present
+        forwardPath = targetUrl.pathname.replace(/\/v1\/?$/, "") + reqPath;
+      } else {
+        // Client sends /chat/completions etc — prepend provider's base path
+        forwardPath = (targetUrl.pathname.replace(/\/$/, "") + reqPath) || "/";
+      }
+
       const headers: Record<string, string> = {
-        "Authorization": authHeader,
         "Content-Type": req.headers["content-type"] ?? "application/json",
       };
+      if (authHeader) {
+        headers["Authorization"] = authHeader;
+      }
 
       const isHttps = targetUrl.protocol === "https:";
       const mod = isHttps ? require("https") : http;
@@ -79,7 +92,7 @@ export class ProxyServer {
       const result = await this.forwardRequest(mod, {
         hostname: targetUrl.hostname,
         port: targetUrl.port || (isHttps ? 443 : 80),
-        path: targetUrl.pathname + targetUrl.search,
+        path: forwardPath,
         method: req.method,
         headers,
       }, body);

@@ -21,7 +21,7 @@ export class Router {
       const provider: Provider | undefined = this.registry.get(id);
       if (!provider) continue;
 
-      if (model && !provider.models.includes(model)) continue;
+      if (model && !provider.models.includes("*") && !provider.models.includes(model)) continue;
       if (this.registry.isDegraded(id)) continue;
 
       if (provider.subscription && this.registry.subscriptionExpired(id)) {
@@ -29,22 +29,35 @@ export class Router {
         if (!refreshed) continue;
       }
 
-      const keyIndex = this.registry.nextKeyIndex(id);
-      if (keyIndex === -1) continue;
+      // Providers with no keys and no subscription (e.g. Strata) need no auth
+      const hasNoAuth = (!provider.keys.length || provider.keys.every((k) => !k.value)) && !provider.subscription;
+      if (!hasNoAuth) {
+        const keyIndex = this.registry.nextKeyIndex(id);
+        if (keyIndex === -1) continue;
 
-      let authHeader: string;
-      if (provider.subscription) {
-        authHeader = `Bearer ${provider.subscription.token}`;
-      } else {
-        authHeader = `Bearer ${provider.keys[keyIndex].value}`;
+        let authHeader: string;
+        if (provider.subscription) {
+          authHeader = `Bearer ${provider.subscription.token}`;
+        } else {
+          authHeader = `Bearer ${provider.keys[keyIndex].value}`;
+        }
+
+        return {
+          providerId: id,
+          provider,
+          keyIndex,
+          format: provider.apiFormat,
+          authHeader,
+        };
       }
 
+      // No auth needed
       return {
         providerId: id,
         provider,
-        keyIndex,
+        keyIndex: 0,
         format: provider.apiFormat,
-        authHeader,
+        authHeader: "",
       };
     }
     return null;
